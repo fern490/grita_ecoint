@@ -1,99 +1,231 @@
-import { Text, View, Pressable, StyleSheet } from 'react-native';
-import { useState } from 'react';
+import 'react-native-reanimated';
+import React, { useState, useEffect, useRef } from 'react';
+import { Text, View, Pressable, StyleSheet, Dimensions } from 'react-native';
+import { MotiView, MotiText, AnimatePresence } from 'moti';
+import * as Haptics from 'expo-haptics';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { Audio } from 'expo-av';
+
+const { width } = Dimensions.get('window');
 
 export default function App() {
   const [pantalla, setPantalla] = useState('inicio');
   const [intensidad, setIntensidad] = useState(0);
+  const recordingRef = useRef<Audio.Recording | null>(null);
 
-  // Función para cambiar color según intensidad
-  const getBackgroundColor = () => {
-    if (intensidad < 5) return '#111';       // oscuro
-    if (intensidad < 10) return '#3b0000';   // rojo suave
-    if (intensidad < 20) return '#7a0000';   // rojo medio
-    return '#ff0000';                        // rojo fuerte
+  // -Lógica del micrófono-
+  async function iniciarMicrofono() {
+    try {
+      const permiso = await Audio.requestPermissionsAsync();
+      if (permiso.status !== 'granted') return;
+
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+      });
+
+      if (recordingRef.current) {
+        await detenerMicrofono();
+      }
+
+      const { recording } = await Audio.Recording.createAsync(
+        Audio.RecordingOptionsPresets.HIGH_QUALITY
+      );
+      
+      recordingRef.current = recording;
+
+      recording.setOnRecordingStatusUpdate((status) => {
+        if (status.metering !== undefined) {
+          if (status.metering > -20) {
+            setIntensidad(prev => prev + 0.4); 
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          }
+        }
+      });
+    } catch (err) {
+      console.log('Error al iniciar micro:', err);
+    }
+  }
+
+  async function detenerMicrofono() {
+    try {
+      if (recordingRef.current) {
+        const status = await recordingRef.current.getStatusAsync();
+        if (status.canRecord) {
+          await recordingRef.current.stopAndUnloadAsync();
+        }
+        recordingRef.current = null;
+      }
+    } catch (e) {
+      console.log('Error al detener/descargar micro:', e);
+      recordingRef.current = null;
+    }
+  }
+
+  useEffect(() => {
+    if (pantalla === 'acumulacion') {
+      iniciarMicrofono();
+    } else {
+      detenerMicrofono();
+    }
+    return () => {
+      detenerMicrofono();
+    };
+  }, [pantalla]);
+
+  const manejarToque = () => {
+    setIntensidad(prev => prev + 1);
+    Haptics.selectionAsync();
+  };
+
+  const reset = () => {
+    setIntensidad(0);
+    setPantalla('inicio');
   };
 
   return (
-    <View style={[styles.container, { backgroundColor: getBackgroundColor() }]}>
-      
-      {pantalla === 'inicio' && (
-        <>
-          <Text style={styles.texto}>¿Qué estás guardando?</Text>
-          <Pressable onPress={() => setPantalla('acumulacion')}>
-            <Text style={styles.boton}>Entrar</Text>
-          </Pressable>
-        </>
-      )}
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <View style={[styles.container, { backgroundColor: intensidad > 10 ? `rgb(${Math.min(intensidad * 4, 55)}, 0, 0)` : '#000' }]}>
+        <AnimatePresence exitBeforeEnter>
+          
+          {pantalla === 'inicio' && (
+            <MotiView
+              key="inicio"
+              from={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              style={styles.content}
+            >
+              <Text style={styles.textoPrincipal}>¿Cuánta es tu emoción?</Text>
+              <Pressable onPress={() => setPantalla('acumulacion')}>
+                <Text style={styles.boton}>Comienza a contar</Text>
+              </Pressable>
+            </MotiView>
+          )}
 
-      {pantalla === 'acumulacion' && (
-        <>
-          <Text style={styles.texto}>Tocá la pantalla...</Text>
+          {pantalla === 'acumulacion' && (
+            <MotiView 
+              key="acum" 
+              from={{ opacity: 0 }} 
+              animate={{ opacity: 1 }} 
+              exit={{ opacity: 0 }}
+              style={styles.content}
+            >
+              <MotiView
+                animate={{ 
+                  scale: 1 + (intensidad * 0.03),
+                  rotate: intensidad > 15 ? ['0deg', '-1deg', '1deg', '0deg'] : '0deg'
+                }}
+                transition={{ type: 'timing', duration: 150 }}
+                style={[
+                  styles.circulo, 
+                  { backgroundColor: `rgb(${Math.min(intensidad * 12, 255)}, 0, 0)` }
+                ]}
+              >
+                <Pressable style={styles.fullPress} onPress={manejarToque}>
+                  <Text style={styles.textoInterno}>{Math.floor(intensidad)}</Text>
+                </Pressable>
+              </MotiView>
 
-          {/* Contador de intensidad */}
-          <Pressable onPress={() => setIntensidad(intensidad + 1)}>
-            <Text style={styles.texto}>Intensidad: {intensidad}</Text>
-          </Pressable>
+              <Text style={styles.instruccion}>Presiona o mantén un sonido </Text>
+              
+              {intensidad > 10 && (
+                <MotiView from={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
+                  <Pressable onPress={() => setPantalla('decision')}>
+                    <Text style={styles.botonSiguiente}>YA NO PUEDO MÁS</Text>
+                  </Pressable>
+                </MotiView>
+              )}
+            </MotiView>
+          )}
 
-          <Pressable onPress={() => setPantalla('decision')}>
-            <Text style={styles.boton}>Seguir</Text>
-          </Pressable>
-        </>
-      )}
+          {pantalla === 'decision' && (
+            <MotiView
+              key="decision"
+              from={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0 }}
+              style={styles.content}
+            >
+              <Text style={styles.textoPrincipal}>Alcanzé mi límite</Text>
+              <View style={styles.row}>
+                <Pressable onPress={reset} style={styles.opcionBoton}>
+                  <Text style={styles.textoOpcion}>Parar</Text>
+                </Pressable>
 
-      {pantalla === 'decision' && (
-        <>
-          <Text style={styles.texto}>¿Callar o gritar?</Text>
-          <Pressable onPress={() => {
-            setIntensidad(0); // reset
-            setPantalla('inicio');
-          }}>
-            <Text style={styles.boton}>Callar</Text>
-          </Pressable>
-          <Pressable onPress={() => setPantalla('grito')}>
-            <Text style={styles.boton}>Gritar</Text>
-          </Pressable>
-        </>
-      )}
+                <Pressable
+                  onPress={() => setPantalla('grito')}
+                  style={[styles.opcionBoton, { borderColor: '#ff0000' }]}
+                >
+                  <Text style={[styles.textoOpcion, { color: '#ff0000', fontWeight: 'bold' }]}>
+                    GRITAR
+                  </Text>
+                </Pressable>
+              </View>
+            </MotiView>
+          )}
 
-      {pantalla === 'grito' && (
-        <>
-          <Text style={styles.texto}>AAAAAAAAA</Text>
-          <Pressable onPress={() => setPantalla('fin')}>
-            <Text style={styles.boton}>Soltar</Text>
-          </Pressable>
-        </>
-      )}
+          {pantalla === 'grito' && (
+            <MotiView
+              key="grito"
+              from={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              style={styles.content}
+            >
+              <MotiText
+                animate={{ fontSize: [40, 75, 55], opacity: [0.7, 1, 0.8] }}
+                transition={{ loop: true, duration: 600, type: 'timing' }}
+                style={styles.gritoTexto}
+              >
+                ¡Inhalar!
+              </MotiText>
 
-      {pantalla === 'fin' && (
-        <>
-          <Text style={styles.texto}>¿Te sentís mejor?</Text>
-          <Pressable onPress={() => {
-            setIntensidad(0); // reset
-            setPantalla('inicio');
-          }}>
-            <Text style={styles.boton}>Reiniciar</Text>
-          </Pressable>
-        </>
-      )}
+              <Pressable
+                onPress={() => setPantalla('fin')}
+                style={{ marginTop: 80, padding: 20 }}
+              >
+                <Text style={styles.boton}>Soltar el aire...</Text>
+              </Pressable>
+            </MotiView>
+          )}
 
-    </View>
+          {pantalla === 'fin' && (
+            <MotiView
+              key="fin"
+              from={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              style={styles.content}
+            >
+              <Text style={styles.textoFinal}>El silencio ahora es distinto.</Text>
+              <Pressable onPress={reset} style={styles.botonReiniciar}>
+                <Text style={styles.textoBotonReiniciar}>Comenzar de nuevo</Text>
+              </Pressable>
+            </MotiView>
+          )}
+
+        </AnimatePresence>
+      </View>
+    </GestureHandlerRootView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  texto: {
-    color: 'white',
-    fontSize: 20,
-    marginBottom: 20,
-  },
-  boton: {
-    color: '#ff4444',
-    fontSize: 18,
-    marginTop: 10,
-  },
+  container: { flex: 1, backgroundColor: '#000' },
+  content: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 20, width: '100%' },
+  circulo: { width: 110, height: 110, borderRadius: 55, borderWidth: 2, borderColor: 'white', marginBottom: 30, justifyContent: 'center', alignItems: 'center' },
+  fullPress: { width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center' },
+  textoInterno: { color: 'white', fontWeight: 'bold', fontSize: 22 },
+  instruccion: { color: '#666', fontSize: 14, marginBottom: 20 },
+  textoPrincipal: { color: 'white', fontSize: 24, textAlign: 'center', marginBottom: 40 },
+  textoFinal: { color: '#ffffff', fontSize: 22, fontStyle: 'italic', textAlign: 'center', fontWeight: '300', marginBottom: 50 },
+  gritoTexto: { color: '#ff0000', fontWeight: '900', textAlign: 'center' },
+  row: { flexDirection: 'row', gap: 20 },
+  opcionBoton: { padding: 15, borderWidth: 1, borderColor: '#fff', borderRadius: 10, minWidth: 110, alignItems: 'center' },
+  textoOpcion: { color: '#fff', fontSize: 16 },
+  boton: { color: 'white', fontSize: 18, textDecorationLine: 'underline', textAlign: 'center' },
+  botonSiguiente: { color: '#ff4444', fontSize: 20, fontWeight: 'bold', marginTop: 20 },
+  botonReiniciar: { paddingVertical: 15, paddingHorizontal: 40, borderWidth: 1, borderColor: '#555', borderRadius: 30 },
+  textoBotonReiniciar: { color: '#aaa', fontSize: 16, letterSpacing: 1.2 },
 });
