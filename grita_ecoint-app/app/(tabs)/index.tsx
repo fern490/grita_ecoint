@@ -12,6 +12,11 @@ export default function App() {
   const [pantalla, setPantalla] = useState("inicio");
   const [intensidad, setIntensidad] = useState(0);
   const recordingRef = useRef<Audio.Recording | null>(null);
+  const pantallaRef = useRef(pantalla);
+
+  useEffect(() => {
+    pantallaRef.current = pantalla;
+  }, [pantalla]);
 
   async function detenerMicrofono() {
     try {
@@ -46,7 +51,7 @@ export default function App() {
       recordingRef.current = recording;
 
       recording.setOnRecordingStatusUpdate((status) => {
-        if (status.metering !== undefined && status.metering > -35) {
+        if (pantallaRef.current === "acumulacion" && status.metering !== undefined && status.metering > -35) {
           setIntensidad((prev) => {
             const nueva = Math.min(prev + 0.5, 80);
             if (Math.floor(nueva) > Math.floor(prev)) Haptics.selectionAsync();
@@ -134,14 +139,12 @@ export default function App() {
               </MotiText>
 
               {intensidad > 50 && (
-                <MotiView
-                  from={{ opacity: 0, scale: 0.9 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                >
-                  <Pressable onPress={() => setPantalla("grito")}>
-                    <Text style={styles.botonAlerta}>
-                      FORZAR ALINEACIÓN
-                    </Text>
+                <MotiView from={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}>
+                  <Pressable onPress={() => {
+                    setIntensidad(80);
+                    setPantalla("grito");
+                  }}>
+                    <Text style={styles.botonAlerta}>FORZAR ALINEACIÓN</Text>
                   </Pressable>
                 </MotiView>
               )}
@@ -168,10 +171,7 @@ export default function App() {
                 style={{ marginTop: 50 }}
               >
                 <Text
-                  style={[
-                    styles.boton,
-                    { color: "#000", borderColor: "#000" },
-                  ]}
+                  style={[styles.boton, { color: "#000", borderColor: "#000" }]}
                 >
                   REINICIAR CICLO
                 </Text>
